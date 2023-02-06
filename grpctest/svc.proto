@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package grpctest;
+
+option go_package = "./grpctest";
+
+
+message HeaderPair {
+   bytes key = 1;
+   bytes value = 2;
+}
+
+message HeadersAndFirstChunk {
+  string transactionID = 1;
+  string remoteAddr = 2;
+  string configID = 3;
+  string method = 4;
+  string uri = 5;
+  bytes uriParsed = 6;
+  string protocol = 7;
+  string queryString = 8;
+  string protoNum = 9;
+  string requestLine = 10;
+  string fileName = 11;
+  repeated HeaderPair headers = 12;
+}
+
+message Response {
+  string something = 1;
+  string else = 2;
+}
+
+service Hello {
+  rpc Echo(HeadersAndFirstChunk) returns (Response) {}
+}
