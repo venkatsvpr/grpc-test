@@ -87,7 +87,7 @@ func startServer(ctx context.Context, socketAddr string) {
 	}()
 }
 
-func benchmarkUDSProto(b *testing.B) {
+func benchmarkUDSProto(b *testing.B, size int) {
 	b.StopTimer()
 
 	ctxt, cancelFn := context.WithCancel(context.Background())
@@ -97,7 +97,7 @@ func benchmarkUDSProto(b *testing.B) {
 	startServer(ctxt, socketAddr)
 	client := getClient(socketAddr)
 
-	stuff := getRequest()
+	stuff := getRequest(size)
 
 	data, _ := proto.Marshal(stuff)
 	buff := make([]byte, 1024)
@@ -117,10 +117,10 @@ func sinkCall(stuff *pb.HeadersAndFirstChunk) (output string) {
 	return
 }
 
-func benchmarkFunCall(b *testing.B) {
+func benchmarkFunCall(b *testing.B, size int) {
 	b.StopTimer()
 
-	stuff := getRequest()
+	stuff := getRequest(size)
 
 	b.StartTimer()
 
@@ -194,13 +194,28 @@ func getgRPCClient(ctx context.Context, connType string, sockaddr string) (clien
 	return pb.NewHelloClient(conn)
 }
 
-func getRequest() *pb.HeadersAndFirstChunk {
-	headerPairs := make([]*pb.HeaderPair, 1)
-	for i := 0; i < 10; i++ {
+func getRequest(size int) *pb.HeadersAndFirstChunk {
+	headerPairs := make([]*pb.HeaderPair, 10)
+
+	for i := 0; i < 5; i++ {
 		headerPairs = append(headerPairs, &pb.HeaderPair{
 			Key:   []byte(strings.Repeat("k", 32)),
 			Value: []byte(strings.Repeat("v", 512)),
 		})
+	}
+
+	// Roughly the 5 headers add 20kb
+	if size > 20*1024 {
+		remaining := size - 20*1024
+		for remaining > 512+32 {
+			headerPairs = append(headerPairs, &pb.HeaderPair{
+				Key:   []byte(strings.Repeat("k", 32)),
+				Value: []byte(strings.Repeat("v", 512)),
+			})
+
+			remaining -= 32
+			remaining -= 512
+		}
 	}
 
 	return &pb.HeadersAndFirstChunk{
@@ -219,7 +234,7 @@ func getRequest() *pb.HeadersAndFirstChunk {
 	}
 }
 
-func benchmarkGRPCUdsProto(b *testing.B) {
+func benchmarkGRPCUdsProto(b *testing.B, size int) {
 	b.StopTimer()
 	ctxt, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
@@ -230,7 +245,7 @@ func benchmarkGRPCUdsProto(b *testing.B) {
 	startgRPCServer(ctxt, connType, socketAddr)
 	client := getgRPCClient(ctxt, connType, socketAddr)
 
-	stuff := getRequest()
+	stuff := getRequest(size)
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -242,7 +257,7 @@ func benchmarkGRPCUdsProto(b *testing.B) {
 	}
 }
 
-func benchmarkGRPCTcpProto(b *testing.B) {
+func benchmarkGRPCTcpProto(b *testing.B, size int) {
 	b.StopTimer()
 	ctxt, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
@@ -252,7 +267,7 @@ func benchmarkGRPCTcpProto(b *testing.B) {
 	startgRPCServer(ctxt, connType, socketAddr)
 	client := getgRPCClient(ctxt, connType, socketAddr)
 
-	stuff := getRequest()
+	stuff := getRequest(size)
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -265,19 +280,22 @@ func benchmarkGRPCTcpProto(b *testing.B) {
 }
 
 func BenchmarkCompare(b *testing.B) {
-	b.Run("Function call, proto  ", func(b *testing.B) {
-		benchmarkFunCall(b)
-	})
+	sizeInKb := []int{20, 64, 128, 256, 512, 1024, 2048}
+	for _, siz := range sizeInKb {
+		b.Run(fmt.Sprintf("Function-call,proto,%dk", siz), func(b *testing.B) {
+			benchmarkFunCall(b, siz*1024)
+		})
 
-	b.Run("Call through UDS,proto", func(b *testing.B) {
-		benchmarkUDSProto(b)
-	})
+		b.Run(fmt.Sprintf("Call UDS,proto,%dk", siz), func(b *testing.B) {
+			benchmarkUDSProto(b, siz*1024)
+		})
 
-	b.Run("Call through GRPC,tcp,proto", func(b *testing.B) {
-		benchmarkGRPCTcpProto(b)
-	})
+		b.Run(fmt.Sprintf("Call GRPC,tcp,proto,%dk", siz), func(b *testing.B) {
+			benchmarkGRPCTcpProto(b, siz*1024)
+		})
 
-	b.Run("Call through GRPC,uds,proto", func(b *testing.B) {
-		benchmarkGRPCUdsProto(b)
-	})
+		b.Run(fmt.Sprintf("Call GRPC,uds,proto,%dk", siz), func(b *testing.B) {
+			benchmarkGRPCUdsProto(b, siz*1024)
+		})
+	}
 }
